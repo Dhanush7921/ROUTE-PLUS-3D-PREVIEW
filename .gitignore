@@ -1,0 +1,10 @@
+site/
+node_modules/
+.env
+.env.*
+*.db
+*.sqlite*
+*.pem
+*.key
+__pycache__/
+.DS_Store
