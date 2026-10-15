@@ -11,6 +11,12 @@ for(const match of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)){
  new AsyncFunction(match[2]);
 }
 for(const file of ['assets/scene.js','assets/immersive.js'])new vm.Script(fs.readFileSync(path.join(root,file),'utf8'));
+const sceneSource=fs.readFileSync(path.join(root,'assets/scene.js'),'utf8');
+assert.ok(sceneSource.includes("powerPreference:'high-performance'"),'WebGL must request the performance GPU');
+assert.ok(sceneSource.includes('1.25)*qualityScale'),'WebGL backing resolution must be capped and adaptive');
+assert.ok(sceneSource.includes('1-Math.exp(-dt*10)'),'Camera smoothing must be time-based, not frame-based');
+assert.ok(sceneSource.includes('sampleCount>=24'),'Adaptive resolution must monitor frame pacing');
+assert.ok(!sceneSource.includes('noise(vWorld*3.0)'),'Avoid expensive interpolated 3D noise in every fragment');
 // Page-load resources must stay local or embedded. External navigation links are allowed.
 const markup=html.replace(/(<script\b[^>]*>)[\s\S]*?<\/script>/g,'$1</script>');
 for(const tag of markup.matchAll(/<(?:script|img|link)\b[^>]*>/g)){
