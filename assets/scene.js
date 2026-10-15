@@ -4,7 +4,7 @@
 (() => {
   'use strict';
   const canvas = document.getElementById('nature-scene');
-  const gl = canvas.getContext('webgl', {alpha:true, antialias:true, powerPreference:'low-power'});
+  const gl = canvas.getContext('webgl', {alpha:true, antialias:false, powerPreference:'high-performance', depth:true, stencil:false, preserveDrawingBuffer:false});
   const status = document.getElementById('scene-status');
   const fallback = document.getElementById('scene-fallback');
   if (!gl) { canvas.hidden=true; fallback.hidden=false; status.textContent='3D unavailable on this device · planner still works'; return; }
@@ -33,9 +33,8 @@
       vec3 n=normalize(vNormal),light=normalize(vec3(-.6,1.0,.6));
       vec3 view=normalize(uEye-vWorld);float diffuse=max(0.0,dot(n,light));
       float spec=pow(max(0.0,dot(n,normalize(light+view))),42.0);
-      float grain=noise(vWorld*3.0)*.13+noise(vWorld*15.0)*.045;
-      vec3 color=vColor*(.60+diffuse*.43+grain);float alpha=1.0;
-      if(vKind<.5){color*=.85+noise(vWorld*1.4)*.22;}
+      vec3 color=vColor*(.60+diffuse*.43);float alpha=1.0;
+      if(vKind<.5){float grain=hash(floor(vWorld*3.0))*.13+hash(floor(vWorld*15.0))*.045;color=vColor*(.60+diffuse*.43+grain);color*=.85+hash(floor(vWorld*1.4))*.22;}
       if(vKind>1.5&&vKind<2.5){
         float stream=sin(vUv.x*70.0+sin(vUv.y*18.0-uTime*3.0))*sin(vUv.y*34.0-uTime*7.0);
         color=mix(vec3(.43,.72,.66),vec3(.98,1.0,.97),.65+stream*.23)+spec*.35;
@@ -171,6 +170,7 @@
   for(let i=0;i<12;i++){const x=random()*16-8,y=.3+random()*2.1,z=random()*9-2,w=2+random()*3;
     quad([x-w,y,z],[x+w,y,z],[x+w,y+2,z],[x-w,y+2,z],[1,1,1],5);
   }
+  gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);
   const attrs=[['aPosition',3,0],['aNormal',3,3],['aColor',3,6],['aUv',2,9],['aKind',1,11]];
   function buffer(data){const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(data),gl.STATIC_DRAW);return {buffer:b,count:data.length/12};}
   const batches=[buffer(opaque),buffer(transparent)];
@@ -178,29 +178,30 @@
   attrs.forEach(a=>a.push(gl.getAttribLocation(program,a[0])));
   function perspective(aspect){const f=1/Math.tan(38*Math.PI/360),near=.1,far=160;return new Float32Array([f/aspect,0,0,0,0,f,0,0,0,0,(far+near)/(near-far),-1,0,0,2*far*near/(near-far),0]);}
   function lookAt(eye,target){const z=normalize(sub(eye,target)),x=normalize(cross([0,1,0],z)),y=cross(z,x);const dot=(a,b)=>a.reduce((s,v,i)=>s+v*b[i],0);return new Float32Array([x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1]);}
-  let progress=0,targetProgress=0,pointer=[0,0],paused=false,visible=true,frame=0,last=0,time=0,focus=0;
+  let progress=0,targetProgress=0,pointer=[0,0],paused=false,visible=true,frame=0,last=0,time=0,focus=0,qualityScale=1,sampleElapsed=0,sampleCount=0,lastCssProgress=-1;
   const reduced=matchMedia('(prefers-reduced-motion: reduce)');
   const stage=document.querySelector('.scene-stage');
-  function resize(){const dpr=Math.min(devicePixelRatio||1,innerWidth<650?1.25:1.65);canvas.width=Math.round(canvas.clientWidth*dpr);canvas.height=Math.round(canvas.clientHeight*dpr);gl.viewport(0,0,canvas.width,canvas.height);}
+  function resize(){const dpr=Math.min(devicePixelRatio||1,innerWidth<650?1:1.25)*qualityScale;const w=Math.max(1,Math.round(canvas.clientWidth*dpr)),h=Math.max(1,Math.round(canvas.clientHeight*dpr));if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h;gl.viewport(0,0,w,h);}}
   function draw(now){
     frame=0;if(!visible||document.hidden)return;
     const moving=!paused&&!reduced.matches;
-    const dt=Math.min((now-last)/1000,.05)||0;last=now;if(moving)time+=dt;
-    progress+=(targetProgress-progress)*.045;
+    const rawDt=last?Math.max(0,(now-last)/1000):0;const dt=Math.min(rawDt,.05);last=now;
+    if(moving){time+=dt;if(rawDt>0){sampleElapsed+=rawDt;sampleCount++;if(sampleCount>=24){const average=sampleElapsed/sampleCount;const priorScale=qualityScale;if(average>1/50)qualityScale=Math.max(.65,qualityScale*.85);else if(average<1/90)qualityScale=Math.min(1,qualityScale+.06);if(qualityScale!==priorScale)resize();sampleElapsed=0;sampleCount=0;}}
+    }
+    progress+=(targetProgress-progress)*(1-Math.exp(-dt*10));
     const p=reduced.matches?0:progress;
     const narrow=innerWidth<700;
     const eye=[22-p*6+pointer[0]*.65,17-p*4+pointer[1]*.3,27-p*7];
     const target=[p*1.5+focus*1.4,2.6+p*.75,0];
     if(narrow){eye[0]*=1.2;eye[1]*=1.2;eye[2]*=1.2;}
-    gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);gl.enable(gl.DEPTH_TEST);gl.disable(gl.CULL_FACE);
+    gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     gl.uniformMatrix4fv(uniforms.uView,false,lookAt(eye,target));gl.uniformMatrix4fv(uniforms.uProjection,false,perspective(canvas.width/canvas.height));gl.uniform3fv(uniforms.uEye,eye);gl.uniform1f(uniforms.uTime,time);gl.uniform1f(uniforms.uRoute,reduced.matches?1:Math.min(1,time*.25));
-    batches.forEach((b,i)=>{gl.bindBuffer(gl.ARRAY_BUFFER,b.buffer);attrs.forEach(([,size,offset,loc])=>{gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,48,offset*4);});if(i){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);}gl.drawArrays(gl.TRIANGLES,0,b.count);gl.depthMask(true);gl.disable(gl.BLEND);});
-    document.documentElement.style.setProperty('--scene-progress',p.toFixed(4));
-    stage.style.setProperty('--story-opacity',Math.max(0,Math.min(1,(p-.35)*2.5)).toFixed(3));
+    batches.forEach((b,i)=>{gl.bindBuffer(gl.ARRAY_BUFFER,b.buffer);attrs.forEach(([,size,offset,loc])=>{gl.enableVertexAttribArray(loc);gl.vertexAttribPointer(loc,size,gl.FLOAT,false,48,offset*4);});if(i){gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);}gl.drawArrays(gl.TRIANGLES,0,b.count);if(i){gl.depthMask(true);gl.disable(gl.BLEND);}});
+    if(lastCssProgress<0||Math.abs(p-lastCssProgress)>.0025){document.documentElement.style.setProperty('--scene-progress',p.toFixed(3));stage.style.setProperty('--story-opacity',Math.max(0,Math.min(1,(p-.35)*2.5)).toFixed(3));lastCssProgress=p;}
     canvas.dataset.rendered='true';
     // A detail view shares the actual WebGL scene, not a stored screenshot.
     const miniature=document.getElementById('temple-preview');
-    if(miniature&&(!miniature.dataset.rendered||time%1<dt)){
+    if(miniature&&!miniature.dataset.rendered){
       miniature.width=600;miniature.height=400;
       const ctx=miniature.getContext('2d');ctx.clearRect(0,0,600,400);
       ctx.drawImage(canvas,canvas.width*.25,canvas.height*.18,canvas.width*.65,canvas.height*.7,0,0,600,400);miniature.dataset.rendered='true';
