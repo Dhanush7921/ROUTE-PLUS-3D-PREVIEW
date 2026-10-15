@@ -497,3 +497,22 @@ dialog::backdrop { background:rgba(4,9,5,.75); backdrop-filter:blur(14px); }
  .scene-stage::before { animation:none !important; }
  .glass-pin,.experience-art,.card { transform:none !important; }
 }
+
+/* Frame pacing: avoid huge compositor effects while the WebGL scene is live. */
+#nature-scene { filter:none; }
+.glass-pin {
+  -webkit-backdrop-filter:blur(12px);
+  backdrop-filter:blur(12px);
+}
+.scene-bottom button {
+  -webkit-backdrop-filter:none;
+  backdrop-filter:none;
+}
+[data-cinema-reveal] { will-change:auto; }
+@media (max-width:900px), (pointer:coarse) {
+  .scene-stage::before { animation:none; }
+  .glass-pin {
+    -webkit-backdrop-filter:blur(7px);
+    backdrop-filter:blur(7px);
+  }
+}
